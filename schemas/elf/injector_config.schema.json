@@ -1,0 +1,58 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "array",
+    "items": [
+        {
+            "type": "object",
+            "properties": {
+                "old_symbol": {
+                    "type": "string"
+                },
+                "new_symbol": {
+                    "type": "string"
+                },
+                "relocation": {
+                    "type": "integer"
+                },
+                "blacklist": {"$ref": "#/$defs/blacklisted_symbols"},
+                "whitelist": {"$ref": "#/$defs/blacklisted_symbols"}
+            },
+            "required": [
+                "old_symbol",
+                "new_symbol",
+                "relocation"
+            ],
+            "oneOf": [
+                {
+                    "required": ["blacklist"]
+                },
+                {
+                    "required": ["whitelist"]
+                }
+            ],
+            "additionalProperties": false
+        }
+    ],
+    "$defs": {
+        "blacklisted_symbols": {
+            "type": "array",
+            "items": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string"
+                        },
+                        "offset": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "symbol",
+                        "offset"
+                    ]
+                }
+            ]
+        }
+    }
+}

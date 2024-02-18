@@ -1,0 +1,22 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "array",
+    "items": [
+        {
+            "type": "object",
+            "properties": {
+                "old_symbol": {
+                    "type": "string"
+                },
+                "new_symbol": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "old_symbol",
+                "new_symbol"
+            ],
+            "additionalProperties": false
+        }
+    ]
+}

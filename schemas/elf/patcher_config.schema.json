@@ -1,0 +1,70 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "array",
+    "items": [
+        {
+            "type": "object",
+            "properties": {
+                "patch_type": {
+                    "enum": [
+                        "inplace",
+                        "additive",
+                        "destructive"
+                    ]
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "offset": {
+                    "type": "string"
+                },
+                "binary_relocs": {
+                    "type": "array",
+                    "items": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "offset": {
+                                    "type": "string"
+                                },
+                                "symbol": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    ]
+                },
+                "binary": {
+                    "type": "array",
+                    "items": [
+                        {
+                            "type": "string"
+                        }
+                    ]
+                },
+                "assembly": {
+                    "type": "array",
+                    "items": [
+                        {
+                            "type": "string"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "patch_type",
+                "symbol",
+                "offset"
+            ],
+            "oneOf": [
+                {
+                    "required": ["binary"]
+                },
+                {
+                    "required": ["assembly"]
+                }
+            ],
+            "additionalProperties": false
+        }
+    ]
+}
