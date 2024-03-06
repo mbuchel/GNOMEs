@@ -106,10 +106,10 @@ void free_elf_renamer_config(struct elf_renamer_config *config)
     for (uint64_t i = 0; i < config->num_symbols && config->symbols != nullptr; ++i) {
         struct elf_renamer_symbol *symbol = &(config->symbols[i]);
 
-        if (symbol->old_symbol) delete symbol->old_symbol;
-        if (symbol->new_symbol) delete symbol->new_symbol;
+        if (symbol->old_symbol) delete [] symbol->old_symbol;
+        if (symbol->new_symbol) delete [] symbol->new_symbol;
     }
 
-    if (config->symbols) delete config->symbols;
+    if (config->symbols) delete [] config->symbols;
     delete config;
 }

@@ -14,6 +14,7 @@ struct LoggerAPI *LOGGER_APIS[TotalLoggers] = {
 };
 
 const struct GnomeEditorAPI *GNOMES[TotalGnomes] = {
+    &gnome_elf_function_adder_api,
     &gnome_elf_injector_api,
     &gnome_elf_renamer_api,
     &gnome_elf_patcher_api

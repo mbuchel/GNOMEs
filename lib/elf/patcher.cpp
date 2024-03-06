@@ -6,26 +6,28 @@
  */
 #include <configs/elf/patcher.h>
 #include <elf/base.hpp>
+#include <elf/editor.hpp>
 #include <elf/patcher.h>
 #include <gnomes/editor.h>
 #include <gnomes/logger.h>
 
 #include <asmtk/asmtk.h>
 #include <asmjit/x86.h>
-#include <elfio/elfio.hpp>
 
 #include <mutex>
 #include <set>
 
 static std::mutex mut;
 
-static struct elf_binary_patch* extract_binary(
-    struct elf_assembly_patch *assembly
+static struct elf_patch* extract_binary(
+    struct elf_patch *patch
 )
 {
     uint64_t i;
 
-    struct elf_binary_patch *ret = nullptr;
+    struct elf_patch *ret = nullptr;
+    struct elf_assembly_patch *assembly = nullptr;
+    struct elf_binary_patch *bin = nullptr;
     std::string instructions = "";
 
     asmjit::Environment env(asmjit::Arch::kX64);
@@ -39,6 +41,26 @@ static struct elf_binary_patch* extract_binary(
     asmtk::Error err;
 
     asmjit::CodeBuffer *buffer;
+
+    if (patch->patch_data_type == BinaryPatch) {
+        ret = patch;
+        goto exit_extract_binary;
+    }
+
+    ret = new struct elf_patch();
+    if (ret == nullptr)
+        goto exit_extract_binary;
+
+    ret->patch_type = NullPatch;
+    ret->patch_data_type = BinaryPatch;
+    ret->symbol = new char[strlen(patch->symbol) + 1];
+    if (ret->symbol == nullptr)
+        goto exit_extract_binary;
+
+    strcpy(ret->symbol, patch->symbol);
+    ret->patch_type = patch->patch_type;
+
+    assembly = &(patch->p.assembly);
 
     for (i = 0; i < assembly->num_instrs; ++i) {
         std::string new_line =
@@ -58,24 +80,24 @@ static struct elf_binary_patch* extract_binary(
     buffer = &(code.textSection()->buffer());
     gnomes_info("Buffer size: %d", buffer->size());
 
-    ret = new struct elf_binary_patch();
-    if (ret == nullptr) goto exit_extract_binary;
+    bin = new struct elf_binary_patch();
+    if (bin == nullptr) goto exit_extract_binary;
 
-    ret->size = buffer->size();
-    ret->data = new uint8_t[ret->size]();
+    bin->size = buffer->size();
+    bin->data = new uint8_t[bin->size]();
 
-    if (ret->data == nullptr)
+    if (bin->data == nullptr)
         goto failed_extract_binary;
 
     memcpy(
-        ret->data,
+        bin->data,
         buffer->data(),
-        ret->size
+        bin->size
     );
 
     gnomes_debug_hexdump2(
-        ret->data,
-        ret->size
+        bin->data,
+        bin->size
     );
 
     i = 0;
@@ -98,32 +120,32 @@ static struct elf_binary_patch* extract_binary(
         );
     }
 
-    ret->reloc_size = i;
-    if (ret->reloc_size)
-        ret->reloc_data = new struct elf_binary_reloc[ret->reloc_size];
+    bin->reloc_size = i;
+    if (bin->reloc_size)
+        bin->reloc_data = new struct elf_binary_reloc[bin->reloc_size];
 
-    gnomes_info("Total relocation entry size: %ld", ret->reloc_size);
+    gnomes_info("Total relocation entry size: %ld", bin->reloc_size);
 
     i = 0;
     for (const auto *label : code.labelEntries()) {
         asmjit::LabelLink *link = label->links();
 
         while (link != nullptr) {
-            ret->reloc_data[i].offset = link->offset;
-            ret->reloc_data[i].symbol = nullptr;
+            bin->reloc_data[i].offset = link->offset;
+            bin->reloc_data[i].symbol = nullptr;
 
             if (label->hasName()) {
                 const char *name = label->name();
-                ret->reloc_data[i].symbol = new char[strlen(name) + 1]();
+                bin->reloc_data[i].symbol = new char[strlen(name) + 1]();
 
-                if (ret->reloc_data[i].symbol)
-                    strcpy(ret->reloc_data[i].symbol, name);
+                if (bin->reloc_data[i].symbol)
+                    strcpy(bin->reloc_data[i].symbol, name);
             }
 
             gnomes_info(
                 "\tAdded %s relocation to 0x%.16lX inside the binary patch.",
-                ret->reloc_data[i].symbol,
-                ret->reloc_data[i].offset
+                bin->reloc_data[i].symbol,
+                bin->reloc_data[i].offset
             );
 
             ++i;
@@ -134,256 +156,157 @@ static struct elf_binary_patch* extract_binary(
     goto exit_extract_binary;
 
 failed_extract_binary:
-    if (ret->data != nullptr) delete ret->data;
-    if (ret->reloc_data != nullptr) {
-        for (uint64_t j = 0; j < ret->reloc_size; ++j)
-            if (ret->reloc_data[j].symbol != nullptr)
-                delete ret->reloc_data[j].symbol;
-        delete ret->reloc_data;
+    if (bin->data != nullptr) delete bin->data;
+    if (bin->reloc_data != nullptr) {
+        for (uint64_t j = 0; j < bin->reloc_size; ++j)
+            if (bin->reloc_data[j].symbol != nullptr)
+                delete bin->reloc_data[j].symbol;
+        delete bin->reloc_data;
     }
+    if (bin != nullptr) delete bin;
+    if (ret != nullptr && ret->symbol != nullptr)
+        delete ret->symbol;
     if (ret != nullptr) delete ret;
 
 exit_extract_binary:
     return ret;
 }
 
-static uint8_t init(
-    struct gnome_info *gnome_data,
-    void *ptr
-)
-{
-    uint8_t ret = 0;
-    std::lock_guard<std::mutex> init_lock(mut);
-
-    if (gnome_data->is_valid) {
-        gnome_data->is_valid = 0;
-    }
-
-    if (ptr != nullptr)
-        gnome_data->config_ptr = ptr;
-
-    ret = 1;
-
-    return ret;
-}
-
 static int edit_bin(
     struct gnome_info *gnome_data,
-    const char *binary
+    ELFFormat *bin
 )
 {
-    int ret = 0;
-    struct elf_patcher_config *config = nullptr;
-    ELFIO::elfio *elf = nullptr;
-    ELFIO::section *symtab = nullptr;
-    ELFIO::section *strtab = nullptr;
-    ELFIO::symbol_section_accessor *syms = nullptr;
-    std::string file_name = binary == nullptr ? "N/A" : binary;
-    std::lock_guard<std::mutex> edit_lock(mut);
+    int ret = EINVAL;
+    struct elf_patcher_config *config =
+        (struct elf_patcher_config*) gnome_data->config_ptr;
 
-    if (gnome_data->output == nullptr) {
-        elf = new ELFIO::elfio();
-        if (elf == nullptr || (binary != nullptr && !elf->load(file_name))) {
-            gnomes_error("Could not load file %s", binary);
-            ret = ENOENT;
-            goto exit_edit_bin;
-        } else if (binary == nullptr) {
-            ret = ENOENT;
-            goto exit_edit_bin;
-        }
-        gnome_data->output = (void*) elf;
-    } else
-        elf = (ELFIO::elfio*) gnome_data->output;
-
-    if (gnome_data->config_ptr == nullptr) {
-        gnomes_error("Invalid configuration.");
-        if (gnome_data->output != nullptr) delete ((ELFIO::elfio*) gnome_data->output);
-        gnome_data->output = nullptr;
-        ret = EINVAL;
-        goto exit_edit_bin;
-    }
-
-    config = (struct elf_patcher_config*) gnome_data->config_ptr;
-
-    gnomes_notice("Loaded %s inside the ELF Patcher GNOME", binary);
-
-    for (uint32_t i = 0; i < elf->sections.size(); ++i) {
-        ELFIO::section *psec = elf->sections[i];
-        gnomes_info("\t[%d] %s\t%d", i, psec->get_name().c_str(), psec->get_type());
-
-        if (psec->get_name() == ".symtab" && psec->get_type() == ELFIO::SHT_SYMTAB) {
-            symtab = psec;
-        } else if (psec->get_name() == ".strtab" && psec->get_type() == ELFIO::SHT_STRTAB) {
-            strtab = psec;
-        }
-    }
-
-    if (symtab == nullptr) {
-        ret = EINVAL;
-        goto exit_edit_bin;
-    }
-
-    syms = new ELFIO::symbol_section_accessor(*elf, symtab);
-    if (syms == nullptr) goto exit_edit_bin;
+    gnomes_notice("Running patcher GNOME...");
 
     for (uint64_t i = 0; i < config->num_patches; ++i) {
-        struct elf_binary_patch *bin = nullptr;
+        const enum SupportedPatchData og_patch_data_type =
+            config->patches[i].patch_data_type;
+        struct elf_binary_patch *bin_patch = nullptr;
         struct elf_patch *patch = &(config->patches[i]);
 
-        ELFIO::section *osec = nullptr;
-        ELFIO::section *rsec = nullptr;
-
         std::string symbol = patch->symbol;
-        std::string rela_name;
 
-        uint64_t offset = 0;
-        uint64_t index = 0;
-        uint16_t section_idx = 0;
-
-        if (!elf_find_symbol_offset(syms, symbol, &offset, &index, &section_idx)) {
-            gnomes_warn("Symbol %s is not found inside the binary: %s", patch->symbol, binary);
+        patch = extract_binary(patch);
+        if (patch == nullptr || patch->patch_type == NullPatch) {
+            gnomes_warn("Invalid binary, skipping patch %ld / %ld", i + 1, config->num_patches);
             continue;
         }
 
-        if (patch->patch_data_type == BinaryPatch)
-            bin = &(patch->p.binary);
-        else if (patch->patch_data_type == AssemblyPatch)
-            bin = extract_binary(&(patch->p.assembly));
+        bin_patch = &(patch->p.binary);
 
-        if (bin == nullptr) continue;
-
-        osec = elf->sections[section_idx];
-        rela_name = ".rela" + osec->get_name();
-
-        for (uint32_t j = 0; j < elf->sections.size(); ++j) {
-            rsec = elf->sections[j];
-            if (rsec->get_name() == rela_name &&
-                rsec->get_type() == ELFIO::SHT_RELA)
-                break;
-            rsec = nullptr;
-        }
-
-        switch (patch->patch_type) {
-        case InplacePatch:
-            gnomes_info("Applying inplace patch to %s at 0x%.16lX", patch->symbol, patch->offset);
-            elf_patch(
-                elf, symtab, osec, rsec,
-                offset,
-                offset + patch->offset,
-                bin
+        if (bin->elf64()) {
+            std::string rel_name;
+            std::string rela_name;
+            std::shared_ptr<ELFSection<Elf64_Shdr>> hashtab =
+                std::static_pointer_cast<ELFSection<Elf64_Shdr>>(bin->hashtab);
+            std::shared_ptr<ELFSection<Elf64_Shdr>> strtab =
+                std::static_pointer_cast<ELFSection<Elf64_Shdr>>(bin->strtab);
+            std::shared_ptr<ELFSection<Elf64_Shdr>> symtab =
+                std::static_pointer_cast<ELFSection<Elf64_Shdr>>(bin->symtab);
+            std::shared_ptr<ELFSection<Elf64_Shdr>> osec = nullptr;
+            std::shared_ptr<ELFSection<Elf64_Shdr>> rsec = nullptr;
+            Elf64_Sym *sym = elf_find_sym<Elf64_Word, Elf64_Sym, Elf64_Shdr>(
+                hashtab,
+                strtab,
+                symtab,
+                symbol
             );
-            break;
-        case AdditivePatch:
-            gnomes_info("Applying additive patch to %s at 0x%.16lX", patch->symbol, patch->offset);
-            elf_patch(
-                elf, symtab, osec, rsec,
-                offset,
-                offset + patch->offset,
-                bin,
-                bin->size
-            );
-            break;
-        case DestructivePatch:
-            gnomes_info("Applying destructive patch to %s at 0x%.16lX", patch->symbol, patch->offset);
-            elf_patch(
-                elf, symtab, osec, rsec,
-                offset,
-                offset + patch->offset,
-                bin,
-                -(bin->size)
-            );
-            break;
-        default:
-            gnomes_warn("Invalid patch type asked for.");
-            break;
-        }
 
-        for (uint64_t j = 0;
-             j < bin->reloc_size &&
-                 bin->reloc_data != nullptr &&
-                 rsec != nullptr;
-             ++j) {
-            ELFIO::relocation_section_accessor rela(*elf, rsec);
-            ELFIO::string_section_accessor str_section(strtab);
-
-            std::string sym_name = bin->reloc_data[j].symbol;
-
-            uint64_t sym_offset = 0;
-            uint64_t sym_idx = 0;
-
-            if (!elf_find_symbol_offset(syms, sym_name, &sym_offset, &sym_idx)) {
-                uint32_t string_idx = 0;
-
-                gnomes_info("Adding symbol %s to the binary %s", bin->reloc_data[j].symbol, binary);
-
-                if (!elf_find_string_offset(&str_section, sym_name, &string_idx))
-                    string_idx = str_section.add_string(sym_name);
-
-                sym_idx = syms->add_symbol(
-                    string_idx,
-                    0, 0,
-                    ELFIO::STB_GLOBAL, 0,
-                    0, 0
-                );
-
-                gnomes_debug("Symbols section now has a %ld symbols", syms->get_symbols_num());
+            if (sym == nullptr) {
+                gnomes_warn("Symbol %s is not found.", patch->symbol);
+                goto clear_patch_data;
             }
 
-            rela.add_entry(
-                offset + patch->offset + bin->reloc_data[j].offset,
-                sym_idx,
-                (unsigned char) (ELFIO::STT_NOTYPE)
-            );
+            osec = std::static_pointer_cast<ELFSection<Elf64_Shdr>>(bin->sections[sym->st_shndx]);
+
+            gnomes_info("Found the symbol in: %s", osec->name.c_str());
+
+            rel_name = ".rel" + osec->name;
+            rela_name = ".rela" + osec->name;
+
+            for (const auto &section : bin->sections) {
+                std::shared_ptr<ELFSection<Elf64_Shdr>> s =
+                    std::static_pointer_cast<ELFSection<Elf64_Shdr>>(section);
+                if (section->name == rel_name && s->hdr->sh_type == SHT_REL) {
+                    rsec = s;
+                    break;
+                }
+                if (section->name == rela_name && s->hdr->sh_type == SHT_RELA) {
+                    rsec = s;
+                    break;
+                }
+            }
+
+            if (rsec == nullptr) goto clear_patch_data;
+
+            switch (patch->patch_type) {
+            case InplacePatch:
+                gnomes_info("Applying inplace patch to %s at 0x%.16lX", patch->symbol, patch->offset);
+                ret = elf_patch<Elf32_Word, Elf64_Shdr, Elf64_Sym, Elf64_Rel, Elf64_Rela, 64>(
+                    hashtab, strtab, symtab,
+                    osec, rsec,
+                    sym,
+                    patch
+                );
+                break;
+            case AdditivePatch:
+                gnomes_info("Applying additive patch to %s at 0x%.16lX", patch->symbol, patch->offset);
+                ret = elf_patch<Elf32_Word, Elf64_Shdr, Elf64_Sym, Elf64_Rel, Elf64_Rela, 64>(
+                    hashtab, strtab, symtab,
+                    osec, rsec,
+                    sym,
+                    patch,
+                    bin_patch->size
+                );
+                break;
+            case DestructivePatch:
+                gnomes_info("Applying destructive patch to %s at 0x%.16lX", patch->symbol, patch->offset);
+                ret = elf_patch<Elf32_Word, Elf64_Shdr, Elf64_Sym, Elf64_Rel, Elf64_Rela, 64>(
+                    hashtab, strtab, symtab,
+                    osec, rsec,
+                    sym,
+                    patch,
+                    -(bin_patch->size)
+                );
+                break;
+            default:
+                gnomes_warn("Invalid patch type asked for skipping patch %ld / %ld", i + 1, config->num_patches);
+                continue;
+            }
+
+            if (ret != 0) {
+                gnomes_warn("Patch invalid value");
+                free_elf_patcher_patch(patch);
+                goto failed_edit_bin;
+            }
         }
 
-        if (patch->patch_data_type == AssemblyPatch) {
-            for (uint64_t j = 0;
-                 j < bin->reloc_size &&
-                     bin->reloc_data != nullptr;
-                 ++j)
-                if (bin->reloc_data[j].symbol)
-                    delete bin->reloc_data[j].symbol;
-            if (bin->reloc_data) delete bin->reloc_data;
-            if (bin->data) delete bin->data;
-            delete bin;
-        }
-
-        gnome_data->is_valid = 1;
+clear_patch_data:
+        // NOTE: We set up a new patch which needs to be cleared.
+        if (og_patch_data_type == AssemblyPatch)
+            free_elf_patcher_patch(patch);
     }
+
+    gnome_data->is_valid = 1;
+
+    goto exit_edit_bin;
+
+failed_edit_bin:
+    ret = EINVAL;
 
 exit_edit_bin:
-    if (syms != nullptr) delete syms;
-
-    return ret;
-}
-
-static int extract(
-    struct gnome_info *gnome_data,
-    void *output_buffer
-)
-{
-    int ret = 0;
-    std::lock_guard<std::mutex> extract_lock(mut);
-
-    if (gnome_data->is_valid) {
-        ELFIO::elfio *elf = (ELFIO::elfio*) gnome_data->output;
-        ret = elf->save((const char*) output_buffer);
-        gnomes_info("Wrote into file: %s", (const char*) output_buffer);
-        gnome_data->is_valid = 0;
-        if (gnome_data->output != nullptr) {
-            delete ((ELFIO::elfio*) gnome_data->output);
-            gnome_data->output = nullptr;
-        }
-    } else {
-        gnomes_error("Output data is not valid yet.");
-        ret = EINVAL;
-    }
-
     return ret;
 }
 
 const struct GnomeEditorAPI gnome_elf_patcher_api = {
-.init = init,
-.edit_bin = edit_bin,
-.extract = extract
+.init = [](struct gnome_info *data, void *ptr) -> int { return (get_init_function(&mut))(data, ptr); },
+.edit_bin = [](struct gnome_info *data, const char *name) -> int {
+    return (get_edit_bin_function(edit_bin, &mut))(data, name);
+},
+.extract = [](struct gnome_info *data, void *ptr) -> int { return (get_extract_function(&mut))(data, ptr); }
 };

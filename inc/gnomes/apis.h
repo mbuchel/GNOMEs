@@ -28,10 +28,11 @@ extern struct LoggerAPI *LOGGER_APIS[TotalLoggers];
 /*! These are the different types of APIs.
  */
 enum SupportedGnomes {
-    ElfInjector = 0,             //!< Changes the function called with the injected function.
-    ElfRenamer = 1,              //!< Renames the functions inside the binary with different function names.
-    ElfPatcher = 2,              //!< Automated patching of functions with machine language.
-    TotalGnomes = 3              //!< Total number of possible GNOMEs used.
+    ElfFunctionAdder = 0,        //!< Adds a global function to an offset inside the binary for easier use.
+    ElfInjector = 1,             //!< Changes the function called with the injected function.
+    ElfRenamer = 2,              //!< Renames the functions inside the binary with different function names.
+    ElfPatcher = 3,              //!< Automated patching of functions with machine language.
+    TotalGnomes = 4              //!< Total number of possible GNOMEs used.
 };
 
 //! GNOME editing APIs.

@@ -5,11 +5,14 @@
 #
 cmake_minimum_required(VERSION 3.9.1)
 
-project("GNOMEs" VERSION 0.0.1)
+project("GNOMEs" VERSION 0.0.2)
+
+find_package(LLVM REQUIRED CONFIG)
 
 # Generated GNOMEs.
 set(
   GNOMES
+  ${CMAKE_CURRENT_BINARY_DIR}/gnomes-elf-function-adder.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/gnomes-elf-inject.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/gnomes-elf-patch.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/gnomes-elf-rename.cpp
@@ -23,11 +26,18 @@ set(
   ${CMAKE_CURRENT_BINARY_DIR}/g_elf_schemas.hpp
 )
 
+# LLVM definitions + directories.
+include_directories(${LLVM_INCLUDE_DIRS})
+separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
+add_definitions(${LLVM_DEFINITIONS_LIST})
+
+# LLVM components required.
+llvm_map_components_to_libnames(llvm_libs objcopy)
+
 # Install and get the vendor libraries
 include(ExternalProject)
 include("${CMAKE_SOURCE_DIR}/vendor/asmjit.cmake")
 include("${CMAKE_SOURCE_DIR}/vendor/asmtk.cmake")
-include("${CMAKE_SOURCE_DIR}/vendor/elfio.cmake")
 include("${CMAKE_SOURCE_DIR}/vendor/rapidjson.cmake")
 
 file(GLOB EXE_SRC RELATIVE ${CMAKE_SOURCE_DIR} "exe/*.*")
@@ -75,17 +85,19 @@ target_include_directories(
    inc
    ${ASMJIT_INCLUDE_DIR}
    ${ASMTK_INCLUDE_DIR}
-   ${ELFIO_INCLUDE_DIR}
    ${RAPIDJSON_INCLUDE_DIR}
+   ${LLVM_INCLUDE_DIRS}
    ${CMAKE_CURRENT_BINARY_DIR}
 )
-add_dependencies(gnomes-static asmjit asmtk elfio rapidjson)
+add_dependencies(gnomes-static asmjit asmtk rapidjson)
 set_property(TARGET gnomes-static PROPERTY C_STANDARD 99)
 set_property(TARGET gnomes-static PROPERTY CXX_STANDARD 17)
+target_compile_options(gnomes-static PUBLIC -Wfatal-errors)
 target_link_libraries(
   gnomes-static
   ${ASMTK_LIBRARY}
   ${ASMJIT_LIBRARY}
+  ${llvm_libs}
 )
 
 # All the GNOMEs we create
