@@ -27,9 +27,7 @@ programmatic manners.
 
 # TODOs
 
-- [ ] Remove ELFIO dependancy
-  - Reason is because ELFIO is too bulky and can be better developed with
-    just using the elf library in linux.
+- [x] Remove ELFIO dependancy
 - [ ] Remove AsmJIT/AsmTK dependancy
   - Reason is because we can perform more interesting tasks if we move up
     to using a proper LLVM backend. In fact it is impossible to properly

@@ -13,6 +13,7 @@
 
 const std::map<std::string, std::string> elf_configs(
 {
+    {"elf_function_adder_config_schema", "schemas/elf/function_adder_config.schema.json"},
     {"elf_injector_config_schema", "schemas/elf/injector_config.schema.json"},
     {"elf_patcher_config_schema", "schemas/elf/patcher_config.schema.json"},
     {"elf_renamer_config_schema", "schemas/elf/renamer_config.schema.json"}

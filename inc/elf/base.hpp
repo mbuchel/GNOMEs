@@ -9,87 +9,157 @@
 
 #include <elf/patcher.h>
 
-#include <elfio/elfio.hpp>
+#include <elf/format.hpp>
 
 #include <stdint.h>
 
+#include <map>
+#include <memory>
 #include <utility>
 #include <vector>
 
 #ifdef __cplusplus
 
-/*! \brief Relocation information for an ELF.
+/*! \brief Performs an ELF hash on the name.
  *
- * This is relocation data for ELF relocation entries.
+ * If a program is executable, a hash table SHOULD be given, if one
+ * exists we need to add all symbols to the elf_hash.
+ *
+ * NOTES:
+ * -# Only SYS-V version of the hash function is implemented.
+ *
+ * \param name - Name of the symbol
+ * \return Hash for the table.
  */
-struct elf_reloc_info {
-    uint64_t index;                           //!< Index in the relocation table.
-    uint64_t offset;                          //!< Offset the relocation happens at.
-    uint32_t symbol;                          //!< Symbol's offset.
-    uint32_t type;                            //!< Type of relocation.
-    int64_t addend;                           //!< Addend information.
-};
+uint32_t elf_hash(const char *name);
 
-/*! \brief Finds the symbol's offset given a string.
+/*! \brief Finds a string inside the string table.
  *
- * This is a helper function to find a specific offset to a given symbol name.
+ * This is a system to find a string inside the string table.
  *
- * \param syms - Symbol section pointer.
- * \param symbol - Symbol's name as a string.
- * \param offset - Where the offset is placed into.
- * \param index - Index for the symbol in the symbol table.
- * \param section_idx - Section's index to determine which section the offset is in.
- * \return 1 if symbol is found, 0 if symbol is not found.
+ * NOTES:
+ * -# This function checks to ensure the section pointer passed is actually a string table.
+ *
+ * \param strs - String section smart pointer.
+ * \param str - String to search for.
+ * \return 0 If not found, or index if it is found.
  */
-uint8_t elf_find_symbol_offset(
-    ELFIO::symbol_section_accessor *syms,
-    const std::string &symbol,
-    uint64_t *offset = nullptr,
-    uint64_t *index = nullptr,
-    uint16_t *section_idx = nullptr
+uint64_t elf_find_str(
+    std::shared_ptr<ELFSectionInterface> strs,
+    const std::string &str
 );
 
-/*! \brief Finds a string's offset given a string.
+/*! \brief Finds a pointer to the symbol we are looking for.
  *
- * This is a helper function to find a specific offset to a string found.
+ * This is a tool to quickly lookup if a symbol with a particular name already exists.
  *
- * \param strs - Strings section pointer.
- * \param str - String to find in the string table.
- * \param offset - Offset inside the string table.
- * \return 1 if string is found, 0 if string is not found.
+ * NOTES:
+ * -# If we have an empty bucket, this returns the null pointer.
+ * -# If we get a value, we need to ensure that the chain is pointing to the correct value.
+ * -# To determine the offset you need to perform (ret - symtab->section_data) / sizeof(S)
+ * -# This is limited to:
+ *    - Elf32_Word, Elf32_Sym, Elf32_Shdr
+ *    - Elf64_Word, Elf64_Sym, Elf64_Shdr
+ * -# If og is a nullptr, we find the last in the chain, if it is a value than we find that
+ *    particular symbol.
  */
-uint8_t elf_find_string_offset(
-    ELFIO::string_section_accessor *strs,
-    const std::string &str,
-    uint32_t *offset = nullptr
+template <typename W, typename S, typename H>
+S *elf_find_sym(
+    std::shared_ptr<ELFSection<H>> hashtab,
+    std::shared_ptr<ELFSection<H>> strtab,
+    std::shared_ptr<ELFSection<H>> symtab,
+    std::string name,
+    S *og = nullptr
 );
 
-/*! \brief Finds all the relocation indexs
+/*! \brief Templated function to help fix the hash tables.
  *
- * This is a helper function to get the relocations.
+ * This ensures we have a fixed hash table and is used in several locations.
  *
- * \param rela - Relocation table pointer.
- * \param symbol_idx - Index of the old symbol.
- * \return Returns a vector of all the relocation information.
+ * NOTES:
+ * -# If the hashtab variable is null than we ignore this completely.
+ * -# This is limited to:
+ *    - Elf32_Word, Elf32_Sym, Elf32_Shdr
+ *    - Elf64_Word, Elf64_Sym, Elf64_Shdr
+ *
+ * \param hashtab - Hashtable to fix.
+ * \param strtab - String table to use.
+ * \param symtab - Symbol table to use.
+ * \return Performed for side effects on the fix hash table.
  */
-std::vector<struct elf_reloc_info> elf_find_relocation_indexs(
-    ELFIO::relocation_section_accessor *rela,
-    uint64_t symbol_idx
+template <typename W, typename S, typename H>
+void elf_fix_hash_table(
+    std::shared_ptr<ELFSection<H>> hashtab,
+    std::shared_ptr<ELFSection<H>> strtab,
+    std::shared_ptr<ELFSection<H>> symtab
+);
+
+/*! \brief Templated function to add a function properly to the symtable.
+ *
+ * This function is used to add functions to the symbol table in a manner that
+ * is correct.
+ *
+ * NOTES:
+ * -# Supports Elf32_Shdr with bits = 32
+ * -# Supports Elf64_Shdr with bits = 64
+ *
+ * \param hash - Hashtable for the additional function.
+ * \param sect - Section to add it into.
+ * \param strs - String table to add it into.
+ * \param syms - Symbol table to add it into.
+ * \param symbol - Symbol's name.
+ * \param offset - Offset of the symbol.
+ */
+template <typename X, int bits>
+int elf_add_function(
+    std::shared_ptr<ELFSection<X>> hash,
+    std::shared_ptr<ELFSection<X>> sect,
+    std::shared_ptr<ELFSection<X>> strs,
+    std::shared_ptr<ELFSection<X>> syms,
+    std::string symbol,
+    uint64_t offset
 );
 
 /*! \brief Finds a nice user explained closest symbol.
  *
  * This is a tool to find a symbol + offset inside a binary.
  *
- * \param syms - Symbol table.
+ * \param symtab - Symbol table.
  * \param offset - Offset into the binary.
  * \return Returns a tuple of a symbol name with offset.
  */
-std::pair<std::string, uint64_t> elf_find_symbol_offset(
-    ELFIO::symbol_section_accessor *syms,
+template <typename S, typename H>
+std::pair<S*, uint64_t> elf_find_sym_offset(
+    std::shared_ptr<ELFSection<H>> symtab,
     uint64_t offset
 );
 
+/*! \brief Patches an ELF formatted function.
+ *
+ * This function performs a patch, and modifies the relocation table to handle the patch.
+ *
+ * \param hashtab - Hash table to add the new function to.
+ * \param strtab - String table for function names.
+ * \param symtab - Symbol table for functions.
+ * \param osec - Section to modify.
+ * \param rsec - Relocation section to modify.
+ * \param sym - Symbol to modify.
+ * \param patch - Patch to apply, must be a binary patch.
+ * \param net_diff - Difference in the new function's size.
+ */
+template <typename WORD, typename HDR, typename SYM, typename REL, typename RELA, int bits>
+int elf_patch(
+    std::shared_ptr<ELFSection<HDR>> hashtab,
+    std::shared_ptr<ELFSection<HDR>> strtab,
+    std::shared_ptr<ELFSection<HDR>> symtab,
+    std::shared_ptr<ELFSection<HDR>> osec,
+    std::shared_ptr<ELFSection<HDR>> rsec,
+    SYM *sym,
+    struct elf_patch *patch,
+    int64_t net_diff = 0
+);
+
+#if 0
 /*! \brief Patches the relocations between 2 points, removing any of those relocations.
  *
  * This function removes the relocations to provide a new relocation table to prepare
@@ -136,6 +206,7 @@ void elf_patch(
     struct elf_binary_patch *bin,
     int64_t net_diff = 0
 );
+#endif
 
 #endif
 

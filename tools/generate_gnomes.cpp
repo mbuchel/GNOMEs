@@ -13,6 +13,7 @@
 
 const std::map<std::string, std::pair<std::string, std::string>> normal_gnomes(
 {
+    {"elf-function-adder", {"elf/function-adder.h", "ElfFunctionAdder"}},
     {"elf-inject", {"elf/injector.h", "ElfInjector"}},
     {"elf-patch", {"elf/patcher.h", "ElfPatcher"}},
     {"elf-rename", {"elf/renamer.h", "ElfRenamer"}}

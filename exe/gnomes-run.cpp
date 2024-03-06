@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  *
  */
+#include <configs/elf/function-adder.h>
 #include <configs/elf/injector.h>
 #include <configs/elf/patcher.h>
 #include <configs/elf/renamer.h>
@@ -85,28 +86,36 @@ void run_gnomes(std::string config_file)
 
         name_ptr = name.c_str();
 
+        if (node.HasMember("elf-function-add") && node["elf-function-add"].IsArray()) {
+            ElfFunctionAdderConfig config((rapidjson::Value*) &node["elf-function-add"]);
+            api = GNOMES[ElfFunctionAdder];
+            api->init(&gnome_data, config.ptr);
+            api->edit_bin(&gnome_data, name_ptr);
+            if (gnome_data.output != nullptr) name_ptr = nullptr;
+        }
+
         if (node.HasMember("elf-inject") && node["elf-inject"].IsArray()) {
             ElfInjectorConfig config((rapidjson::Value*) &node["elf-inject"]);
             api = GNOMES[ElfInjector];
             api->init(&gnome_data, config.ptr);
             api->edit_bin(&gnome_data, name_ptr);
-            name_ptr = nullptr;
+            if (gnome_data.output != nullptr) name_ptr = nullptr;
         }
 
-        if (node.HasMember("elf-patch")) {
+        if (node.HasMember("elf-patch") && node["elf-patch"].IsArray()) {
             ElfPatcherConfig config((rapidjson::Value*) &node["elf-patch"]);
             api = GNOMES[ElfPatcher];
             api->init(&gnome_data, config.ptr);
             api->edit_bin(&gnome_data, name_ptr);
-            name_ptr = nullptr;
+            if (gnome_data.output != nullptr) name_ptr = nullptr;
         }
 
-        if (node.HasMember("elf-rename")) {
+        if (node.HasMember("elf-rename") && node["elf-rename"].IsArray()) {
             ElfRenamerConfig config((rapidjson::Value*) &node["elf-rename"]);
             api = GNOMES[ElfRenamer];
             api->init(&gnome_data, config.ptr);
             api->edit_bin(&gnome_data, name_ptr);
-            name_ptr = nullptr;
+            if (gnome_data.output != nullptr) name_ptr = nullptr;
         }
 
         if (api != nullptr)

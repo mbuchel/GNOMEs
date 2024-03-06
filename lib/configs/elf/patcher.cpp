@@ -222,8 +222,8 @@ void free_elf_patcher_patch(struct elf_patch *patch)
                  patch->p.assembly.instructions != nullptr &&
                  patch->p.assembly.instructions[j] != nullptr;
              ++j)
-            delete patch->p.assembly.instructions[j];
-        if (patch->p.assembly.instructions) free(patch->p.assembly.instructions);
+            delete [] patch->p.assembly.instructions[j];
+        if (patch->p.assembly.instructions) delete [] patch->p.assembly.instructions;
         break;
     case BinaryPatch:
         for (uint64_t j = 0;
@@ -231,9 +231,9 @@ void free_elf_patcher_patch(struct elf_patch *patch)
                  patch->p.binary.reloc_data != nullptr;
              ++j)
             if (patch->p.binary.reloc_data[j].symbol)
-                delete patch->p.binary.reloc_data[j].symbol;
-        if (patch->p.binary.reloc_data) delete patch->p.binary.reloc_data;
-        if (patch->p.binary.data) delete patch->p.binary.data;
+                delete [] patch->p.binary.reloc_data[j].symbol;
+        if (patch->p.binary.reloc_data) delete [] patch->p.binary.reloc_data;
+        if (patch->p.binary.data) delete [] patch->p.binary.data;
         break;
     default:
         gnomes_warn("Patching data type is not supported.");
@@ -250,6 +250,6 @@ void free_elf_patcher_config(struct elf_patcher_config *config)
         free_elf_patcher_patch(patch);
     }
 
-    if (config->patches) delete config->patches;
+    if (config->patches) delete [] config->patches;
     delete config;
 }

@@ -1,0 +1,33 @@
+{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "array",
+    "items": [
+        {
+            "type": "object",
+            "properties": {
+                "offset": {
+                    "type": "string"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "str_section": {
+                    "type": "string"
+                },
+                "sym_section": {
+                    "type": "string"
+                },
+                "section": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "offset",
+                "symbol",
+                "sym_section",
+                "section"
+            ],
+            "additionalProperties": false
+        }
+    ]
+}

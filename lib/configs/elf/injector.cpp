@@ -154,17 +154,17 @@ void free_elf_injector_config(struct elf_injector_config *config)
     for (uint64_t i = 0; i < config->num_symbols && config->symbols != nullptr; ++i) {
         struct elf_injector_symbol *symbol = &(config->symbols[i]);
 
-        if (symbol->old_symbol) delete symbol->old_symbol;
-        if (symbol->new_symbol) delete symbol->new_symbol;
+        if (symbol->old_symbol) delete [] symbol->old_symbol;
+        if (symbol->new_symbol) delete [] symbol->new_symbol;
 
         if (symbol->blacklist == nullptr) continue;
 
         for (uint64_t j = 0; j < symbol->num_blacklisted; ++j) {
-            delete symbol->blacklist[j].symbol;
+            delete [] symbol->blacklist[j].symbol;
         }
-        delete symbol->blacklist;
+        delete [] symbol->blacklist;
     }
 
-    if (config->symbols) delete config->symbols;
+    if (config->symbols) delete [] config->symbols;
     delete config;
 }

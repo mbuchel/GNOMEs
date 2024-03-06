@@ -27,6 +27,10 @@ struct gnome_info {
                                                        //   is_valid flag before running.
 };
 
+//! Helper typedefs to simplify code.
+typedef int (*editor_untyped_fn)(struct gnome_info*, void*);
+typedef int (*editor_char_fn)(struct gnome_info*, const char*);
+
 /*! \brief API Abstraction for GNOMEs which are being used to modify binaries.
  *
  * The process for using a GNOME is to modify a ELF or DWARF component
@@ -41,19 +45,22 @@ struct gnome_info {
  * functions should be exported into C to allow calling from a C program.
  */
 struct GnomeEditorAPI {
-    uint8_t (*init)(
-        struct gnome_info*,
-        void*
-    );                                                 //!< Creates an initial state for the GNOME.
-    int (*edit_bin)(
-        struct gnome_info*,
-        const char*
-    );                                                 //!< Sets the binary to focus on.
-    int (*extract)(
-        struct gnome_info*,
-        void*
-    );                                                 //!< Exports the output into the structure.
+    editor_untyped_fn init;                            //!< Creates an initial state for the GNOME.
+    editor_char_fn edit_bin;                           //!< Sets the binary to focus on.
+    editor_untyped_fn extract;                         //!< Exports the output into the structure.
 };
+
+/*! \brief Function adder API.
+ *
+ * This is to readd a symbol name for a unnamed symbol.
+ *
+ * NOTES:
+ * -# This API finds the offset and if the offset is inside the symbol table, we simply
+ *    modify the string index to a new string representing the identifier of that symbol.
+ * -# This is used to provide names for functions that are not easily indexed due to individuals
+ *    stripping the binary.
+ */
+extern const struct GnomeEditorAPI gnome_elf_function_adder_api;
 
 /*! \brief Injection API.
  *
@@ -66,12 +73,6 @@ struct GnomeEditorAPI {
  * -# Extract expects a const char pointer to a file name for the export.
  */
 extern const struct GnomeEditorAPI gnome_elf_injector_api;
-
-/*! \brief Renamer API.
- *
- * This API takes the old names in a binary and replaces them with different names.
- */
-extern const struct GnomeEditorAPI gnome_elf_renamer_api;
 
 /*! \brief Patcher API.
  *
@@ -87,6 +88,12 @@ extern const struct GnomeEditorAPI gnome_elf_renamer_api;
  * -# Extract expects a const char pointer to a file name for the export.
  */
 extern const struct GnomeEditorAPI gnome_elf_patcher_api;
+
+/*! \brief Renamer API.
+ *
+ * This API takes the old names in a binary and replaces them with different names.
+ */
+extern const struct GnomeEditorAPI gnome_elf_renamer_api;
 
 #ifdef __cplusplus
 };
