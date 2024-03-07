@@ -53,6 +53,7 @@ static struct elf_patch* extract_binary(
 
     ret->patch_type = NullPatch;
     ret->patch_data_type = BinaryPatch;
+    ret->offset = patch->offset;
     ret->symbol = new char[strlen(patch->symbol) + 1];
     if (ret->symbol == nullptr)
         goto exit_extract_binary;
@@ -80,8 +81,7 @@ static struct elf_patch* extract_binary(
     buffer = &(code.textSection()->buffer());
     gnomes_info("Buffer size: %d", buffer->size());
 
-    bin = new struct elf_binary_patch();
-    if (bin == nullptr) goto exit_extract_binary;
+    bin = &(ret->p.binary);
 
     bin->size = buffer->size();
     bin->data = new uint8_t[bin->size]();
@@ -163,7 +163,6 @@ failed_extract_binary:
                 delete bin->reloc_data[j].symbol;
         delete bin->reloc_data;
     }
-    if (bin != nullptr) delete bin;
     if (ret != nullptr && ret->symbol != nullptr)
         delete ret->symbol;
     if (ret != nullptr) delete ret;
@@ -247,7 +246,7 @@ static int edit_bin(
             switch (patch->patch_type) {
             case InplacePatch:
                 gnomes_info("Applying inplace patch to %s at 0x%.16lX", patch->symbol, patch->offset);
-                ret = elf_patch<Elf32_Word, Elf64_Shdr, Elf64_Sym, Elf64_Rel, Elf64_Rela, 64>(
+                ret = elf_patch<Elf64_Word, Elf64_Shdr, Elf64_Sym, Elf64_Rel, Elf64_Rela, 64>(
                     hashtab, strtab, symtab,
                     osec, rsec,
                     sym,
@@ -256,7 +255,7 @@ static int edit_bin(
                 break;
             case AdditivePatch:
                 gnomes_info("Applying additive patch to %s at 0x%.16lX", patch->symbol, patch->offset);
-                ret = elf_patch<Elf32_Word, Elf64_Shdr, Elf64_Sym, Elf64_Rel, Elf64_Rela, 64>(
+                ret = elf_patch<Elf64_Word, Elf64_Shdr, Elf64_Sym, Elf64_Rel, Elf64_Rela, 64>(
                     hashtab, strtab, symtab,
                     osec, rsec,
                     sym,
@@ -266,7 +265,92 @@ static int edit_bin(
                 break;
             case DestructivePatch:
                 gnomes_info("Applying destructive patch to %s at 0x%.16lX", patch->symbol, patch->offset);
-                ret = elf_patch<Elf32_Word, Elf64_Shdr, Elf64_Sym, Elf64_Rel, Elf64_Rela, 64>(
+                ret = elf_patch<Elf64_Word, Elf64_Shdr, Elf64_Sym, Elf64_Rel, Elf64_Rela, 64>(
+                    hashtab, strtab, symtab,
+                    osec, rsec,
+                    sym,
+                    patch,
+                    -(bin_patch->size)
+                );
+                break;
+            default:
+                gnomes_warn("Invalid patch type asked for skipping patch %ld / %ld", i + 1, config->num_patches);
+                continue;
+            }
+
+            if (ret != 0) {
+                gnomes_warn("Patch invalid value");
+                free_elf_patcher_patch(patch);
+                goto failed_edit_bin;
+            }
+        } else {
+            std::string rel_name;
+            std::string rela_name;
+            std::shared_ptr<ELFSection<Elf32_Shdr>> hashtab =
+                std::static_pointer_cast<ELFSection<Elf32_Shdr>>(bin->hashtab);
+            std::shared_ptr<ELFSection<Elf32_Shdr>> strtab =
+                std::static_pointer_cast<ELFSection<Elf32_Shdr>>(bin->strtab);
+            std::shared_ptr<ELFSection<Elf32_Shdr>> symtab =
+                std::static_pointer_cast<ELFSection<Elf32_Shdr>>(bin->symtab);
+            std::shared_ptr<ELFSection<Elf32_Shdr>> osec = nullptr;
+            std::shared_ptr<ELFSection<Elf32_Shdr>> rsec = nullptr;
+            Elf32_Sym *sym = elf_find_sym<Elf32_Word, Elf32_Sym, Elf32_Shdr>(
+                hashtab,
+                strtab,
+                symtab,
+                symbol
+            );
+
+            if (sym == nullptr) {
+                gnomes_warn("Symbol %s is not found.", patch->symbol);
+                goto clear_patch_data;
+            }
+
+            osec = std::static_pointer_cast<ELFSection<Elf32_Shdr>>(bin->sections[sym->st_shndx]);
+
+            gnomes_info("Found the symbol in: %s", osec->name.c_str());
+
+            rel_name = ".rel" + osec->name;
+            rela_name = ".rela" + osec->name;
+
+            for (const auto &section : bin->sections) {
+                std::shared_ptr<ELFSection<Elf32_Shdr>> s =
+                    std::static_pointer_cast<ELFSection<Elf32_Shdr>>(section);
+                if (section->name == rel_name && s->hdr->sh_type == SHT_REL) {
+                    rsec = s;
+                    break;
+                }
+                if (section->name == rela_name && s->hdr->sh_type == SHT_RELA) {
+                    rsec = s;
+                    break;
+                }
+            }
+
+            if (rsec == nullptr) goto clear_patch_data;
+
+            switch (patch->patch_type) {
+            case InplacePatch:
+                gnomes_info("Applying inplace patch to %s at 0x%.16lX", patch->symbol, patch->offset);
+                ret = elf_patch<Elf32_Word, Elf32_Shdr, Elf32_Sym, Elf32_Rel, Elf32_Rela, 32>(
+                    hashtab, strtab, symtab,
+                    osec, rsec,
+                    sym,
+                    patch
+                );
+                break;
+            case AdditivePatch:
+                gnomes_info("Applying additive patch to %s at 0x%.16lX", patch->symbol, patch->offset);
+                ret = elf_patch<Elf32_Word, Elf32_Shdr, Elf32_Sym, Elf32_Rel, Elf32_Rela, 32>(
+                    hashtab, strtab, symtab,
+                    osec, rsec,
+                    sym,
+                    patch,
+                    bin_patch->size
+                );
+                break;
+            case DestructivePatch:
+                gnomes_info("Applying destructive patch to %s at 0x%.16lX", patch->symbol, patch->offset);
+                ret = elf_patch<Elf32_Word, Elf32_Shdr, Elf32_Sym, Elf32_Rel, Elf32_Rela, 32>(
                     hashtab, strtab, symtab,
                     osec, rsec,
                     sym,
